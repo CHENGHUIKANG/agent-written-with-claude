@@ -115,6 +115,8 @@ class LLMClient:
 
             response = await self.client.chat.completions.create(**kwargs)
 
+            tool_call_buffer = {}
+            
             async for chunk in response:
                 delta = chunk.choices[0].delta if chunk.choices else None
                 
@@ -126,10 +128,31 @@ class LLMClient:
                         for tool_call in delta.tool_calls:
                             if hasattr(tool_call, 'function'):
                                 func = tool_call.function
-                                if hasattr(func, 'name') and hasattr(func, 'arguments'):
-                                    yield f"[TOOL_CALL:{func.name}:{func.arguments}]"
+                                if hasattr(func, 'name'):
+                                    tool_name = func.name
+                                    
+                                    if tool_name not in tool_call_buffer:
+                                        tool_call_buffer[tool_name] = {
+                                            "name": tool_name,
+                                            "arguments": ""
+                                        }
+                                    
+                                    if hasattr(func, 'arguments') and func.arguments:
+                                        tool_call_buffer[tool_name]["arguments"] += func.arguments
                     
                     if hasattr(chunk.choices[0], 'finish_reason') and chunk.choices[0].finish_reason:
+                        for tool_name, tool_data in tool_call_buffer.items():
+                            arguments_str = tool_data["arguments"]
+                            try:
+                                import json
+                                if arguments_str and arguments_str.strip():
+                                    arguments = json.loads(arguments_str)
+                                else:
+                                    arguments = {}
+                                yield f"[TOOL_CALL:{tool_name}:{arguments_str}]"
+                            except json.JSONDecodeError:
+                                yield f"[TOOL_CALL:{tool_name}:{arguments_str}]"
+                        
                         yield "[DONE]"
                         
         except Exception as e:

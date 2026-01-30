@@ -93,34 +93,43 @@ class ToolManager:
                 logger.info(f"MCP服务器 {mcp_server.name} 连接成功，加载了 {len(tools.tools)} 个工具")
                 
             elif mcp_server.server_type == ServerType.STREAMABLE_HTTP:
-                from mcp.client.stdio import stdio_client
+                import httpx
                 url = mcp_server.connection_params.get("url")
-                command = mcp_server.connection_params.get("command", "mcp-client")
-                args = mcp_server.connection_params.get("args", [])
-                env = mcp_server.connection_params.get("env", {})
                 
-                read_stream, write_stream = await stdio_client(command, args, env).__aenter__()
-                session = ClientSession(read_stream, write_stream)
-                
-                await session.initialize()
-                
-                self._mcp_clients[mcp_server.id] = {
-                    "client": session,
-                    "context": (read_stream, write_stream),
-                    "server": mcp_server
-                }
-                
-                tools = await session.list_tools()
-                for tool in tools.tools:
-                    tool_key = f"mcp_{mcp_server.id}_{tool.name}"
-                    self.external_tools[tool_key] = {
-                        "mcp_server_id": mcp_server.id,
-                        "tool_name": tool.name,
-                        "tool": tool
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(url, headers={
+                        "Accept": "application/json, text/event-stream"
+                    }, json={
+                        "jsonrpc": "2.0",
+                        "method": "tools/list",
+                        "id": "96d57e63-2"
+                    })
+                    
+                    if response.status_code != 200:
+                        raise Exception(f"HTTP请求失败，状态码: {response.status_code}")
+                    
+                    data = response.json()
+                    
+                    if "result" not in data or "tools" not in data.get("result", {}):
+                        raise Exception("响应中未找到tools字段")
+                    
+                    tools_data = data.get("result", {}).get("tools", [])
+                    
+                    self._mcp_clients[mcp_server.id] = {
+                        "url": url,
+                        "server": mcp_server
                     }
-                    self._tool_definitions[tool_key] = tool.model_dump()
-                
-                logger.info(f"MCP服务器 {mcp_server.name} 连接成功，加载了 {len(tools.tools)} 个工具")
+                    
+                    for tool_data in tools_data:
+                        tool_key = f"mcp_{mcp_server.id}_{tool_data.get('name', '')}"
+                        self.external_tools[tool_key] = {
+                            "mcp_server_id": mcp_server.id,
+                            "tool_name": tool_data.get('name', ''),
+                            "tool": tool_data
+                        }
+                        self._tool_definitions[tool_key] = tool_data
+                    
+                    logger.info(f"MCP服务器 {mcp_server.name} 连接成功，加载了 {len(tools_data)} 个工具")
                 
         except Exception as e:
             logger.error(f"连接MCP服务器失败: {str(e)}")
@@ -192,8 +201,6 @@ class ToolManager:
     async def _execute_external_tool(self, tool_key: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """执行外部MCP工具"""
         try:
-            from mcp import ClientSession
-            
             external_tool = self.external_tools[tool_key]
             mcp_server_id = external_tool["mcp_server_id"]
             tool_name = external_tool["tool_name"]
@@ -205,23 +212,63 @@ class ToolManager:
                 }
             
             client_info = self._mcp_clients[mcp_server_id]
-            session = client_info["client"]
+            server = client_info["server"]
             
-            result = await session.call_tool(tool_name, arguments)
-            
-            if isinstance(result, dict) and "content" in result:
-                content = result["content"]
-                if isinstance(content, list) and len(content) > 0:
-                    content = content[0]
-                    if isinstance(content, dict) and "text" in content:
-                        return content["text"]
+            if server.server_type == ServerType.STREAMABLE_HTTP:
+                import httpx
+                url = client_info["url"]
+                
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(url, headers={
+                        "Accept": "application/json, text/event-stream"
+                    }, json={
+                        "jsonrpc": "2.0",
+                        "method": "tools/call",
+                        "id": "96d57e63-2",
+                        "params": {
+                            "name": tool_name,
+                            "arguments": arguments
+                        }
+                    })
+                    
+                    if response.status_code != 200:
+                        raise Exception(f"HTTP请求失败，状态码: {response.status_code}")
+                    
+                    data = response.json()
+                    
+                    if "result" not in data:
+                        raise Exception("响应中未找到result字段")
+                    
+                    result = data.get("result", {})
+                    
+                    if isinstance(result, dict) and "content" in result:
+                        content = result["content"]
+                        if isinstance(content, list) and len(content) > 0:
+                            content = content[0]
+                            if isinstance(content, dict) and "text" in content:
+                                return content["text"]
+                            return content
+                        return content
+                    return result
+            else:
+                from mcp import ClientSession
+                session = client_info["client"]
+                
+                result = await session.call_tool(tool_name, arguments)
+                
+                if isinstance(result, dict) and "content" in result:
+                    content = result["content"]
+                    if isinstance(content, list) and len(content) > 0:
+                        content = content[0]
+                        if isinstance(content, dict) and "text" in content:
+                            return content["text"]
+                        return content
                     return content
-                return content
-            
-            return {
-                "success": True,
-                "result": result
-            }
+                
+                return {
+                    "success": True,
+                    "result": result
+                }
         except Exception as e:
             logger.error(f"执行外部工具 {tool_key} 失败: {str(e)}")
             raise

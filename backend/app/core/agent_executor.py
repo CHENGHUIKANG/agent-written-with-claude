@@ -143,6 +143,7 @@ class AgentExecutor:
             try:
                 tool_calls_buffer = []
                 current_content = ""
+                tool_arguments_buffer = {}
                 
                 async for chunk in self.llm_client.stream_chat_completion(
                     messages=messages,
@@ -153,50 +154,58 @@ class AgentExecutor:
                     elif chunk == "[DONE]":
                         if tool_calls_buffer:
                             for tool_call_str in tool_calls_buffer:
-                                yield tool_call_str
-                            
-                            for tool_call_str in tool_calls_buffer:
                                 try:
                                     import json
                                     match = tool_call_str.replace("[TOOL_CALL:", "").replace("]", "")
+                                    
                                     if ":" in match:
                                         parts = match.split(":", 1)
                                         tool_name = parts[0]
-                                        tool_arguments = parts[1] if len(parts) > 1 else "{}"
-                                        
-                                        arguments = json.loads(tool_arguments)
-                                        
-                                        logger.info(f"执行工具: {tool_name}, 参数: {arguments}")
-                                        
-                                        tool_result = await tool_manager.execute_tool(tool_name, arguments)
-                                        
-                                        yield f"[TOOL_RESULT:{tool_name}:{json.dumps(tool_result)}]"
-                                        
-                                        messages.append({
-                                            "role": "assistant",
-                                            "content": current_content,
-                                            "tool_calls": [{
-                                                "id": f"call_{iteration}_{len(tool_calls_buffer)}",
-                                                "type": "function",
-                                                "function": {
-                                                    "name": tool_name,
-                                                    "arguments": tool_arguments
-                                                }
-                                            }]
-                                        })
-                                        
-                                        messages.append({
-                                            "role": "tool",
-                                            "tool_call_id": f"call_{iteration}_{len(tool_calls_buffer)}",
-                                            "name": tool_name,
-                                            "content": str(tool_result)
-                                        })
+                                        tool_arguments_str = parts[1] if len(parts) > 1 else "{}"
+                                    else:
+                                        tool_name = match
+                                        tool_arguments_str = "{}"
+                                    
+                                    try:
+                                        arguments = json.loads(tool_arguments_str)
+                                    except json.JSONDecodeError:
+                                        arguments = tool_arguments_buffer
+                                    
+                                    if not arguments:
+                                        arguments = {}
+                                    
+                                    logger.info(f"执行工具: {tool_name}, 参数: {arguments}")
+                                    
+                                    tool_result = await tool_manager.execute_tool(tool_name, arguments)
+                                    
+                                    yield f"[TOOL_RESULT:{tool_name}:{json.dumps(tool_result)}]"
+                                    
+                                    messages.append({
+                                        "role": "assistant",
+                                        "content": current_content,
+                                        "tool_calls": [{
+                                            "id": f"call_{iteration}_{len(tool_calls_buffer)}",
+                                            "type": "function",
+                                            "function": {
+                                                "name": tool_name,
+                                                "arguments": tool_arguments_str
+                                            }
+                                        }]
+                                    })
+                                    
+                                    messages.append({
+                                        "role": "tool",
+                                        "tool_call_id": f"call_{iteration}_{len(tool_calls_buffer)}",
+                                        "name": tool_name,
+                                        "content": str(tool_result)
+                                    })
                                 except Exception as e:
                                     logger.error(f"处理工具调用失败: {str(e)}")
                                     yield f"[ERROR:工具调用失败: {str(e)}]"
                             
                             tool_calls_buffer = []
                             current_content = ""
+                            tool_arguments_buffer = {}
                         else:
                             yield chunk
                             return
