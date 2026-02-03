@@ -3,8 +3,13 @@ const path = require('path');
 const Store = require('electron-store');
 
 const store = new Store();
-
 let mainWindow;
+
+function isDevelopment() {
+  return process.env.NODE_ENV === 'development' || 
+         process.env.ELECTRON_IS_DEV === 'true' ||
+         !app.isPackaged;
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -19,19 +24,42 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js')
     },
     icon: path.join(__dirname, '../../build/icon.ico'),
-    show: false
+    show: false,
+    backgroundColor: '#ffffff'
   });
 
-  const isDev = process.env.NODE_ENV === 'development';
+  const isDev = isDevelopment();
+
+  console.log('Development mode:', isDev);
 
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173');
+    const devUrl = 'http://localhost:5173';
+    console.log('Loading from:', devUrl);
+    
+    mainWindow.loadURL(devUrl).catch((error) => {
+      console.error('Failed to load URL:', error);
+      mainWindow.loadFile(path.join(__dirname, '../renderer/vue-app/dist/index.html'));
+    });
+    
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../renderer/vue-app/dist/index.html'));
+    const filePath = path.join(__dirname, '../renderer/vue-app/dist/index.html');
+    console.log('Loading file:', filePath);
+    mainWindow.loadFile(filePath);
   }
 
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    console.error('Failed to load:', errorCode, errorDescription, validatedURL, isMainFrame);
+    if (isDev && isMainFrame) {
+      console.log('Retrying to load...');
+      setTimeout(() => {
+        mainWindow.loadURL('http://localhost:5173');
+      }, 2000);
+    }
+  });
+
   mainWindow.once('ready-to-show', () => {
+    console.log('Window ready to show');
     mainWindow.show();
   });
 

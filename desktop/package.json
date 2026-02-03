@@ -4,9 +4,9 @@
   "description": "Agent Desktop Application - Electron + Vue 3",
   "main": "src/main/index.js",
   "scripts": {
-    "dev": "concurrently \"npm run dev:vue\" \"npm run dev:electron\"",
+    "dev": "concurrently \"npm run dev:vue\" \"wait-on http://localhost:5173 && npm run dev:electron\"",
     "dev:vue": "cd src/renderer/vue-app && npm run dev",
-    "dev:electron": "electron .",
+    "dev:electron": "cross-env ELECTRON_IS_DEV=true electron .",
     "build": "cd src/renderer/vue-app && npm run build",
     "build:electron": "electron-builder",
     "build:win": "electron-builder --win",
@@ -22,9 +22,11 @@
   "author": "Your Company",
   "license": "MIT",
   "devDependencies": {
+    "cross-env": "^7.0.3",
     "electron": "^28.0.0",
     "electron-builder": "^24.9.1",
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "wait-on": "^7.2.0"
   },
   "dependencies": {
     "electron-store": "^8.1.0"
@@ -56,7 +58,8 @@
           ]
         }
       ],
-      "icon": "build/icon.ico"
+      "sign": null,
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,
