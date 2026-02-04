@@ -40,6 +40,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     """聊天响应"""
     content: Optional[str] = Field(None, description="响应内容")
+    reasoning: Optional[str] = Field(None, description="思考内容")
     tool_calls: Optional[List[ToolCall]] = Field(None, description="工具调用")
     finish_reason: Optional[str] = Field(None, description="完成原因")
     usage: Optional[Dict[str, int]] = Field(None, description="使用情况")

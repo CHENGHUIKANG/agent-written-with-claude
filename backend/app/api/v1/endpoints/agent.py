@@ -48,6 +48,9 @@ async def chat(
             tools=tools,
             conversation_history=None
         )
+        # 确保 reasoning 字段存在
+        if 'reasoning' not in result or result['reasoning'] is None:
+            result['reasoning'] = None
         return ChatResponse(**result)
     except Exception as e:
         raise HTTPException(

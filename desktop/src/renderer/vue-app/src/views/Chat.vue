@@ -9,6 +9,23 @@
         >
           <div class="message-content">
             <div class="message-role">{{ message.role === 'user' ? '我' : 'AI' }}</div>
+            <div v-if="message.reasoning && message.role === 'assistant'" class="reasoning-toggle">
+              <el-button
+                text
+                size="small"
+                type="info"
+                @click="toggleReasoning(index)"
+              >
+                <el-icon>
+                  <component :is="message.showReasoning ? ArrowUp : ArrowDown" />
+                </el-icon>
+                {{ message.showReasoning ? '隐藏思考' : '显示思考' }}
+              </el-button>
+            </div>
+            <div v-if="message.reasoning && message.showReasoning && message.role === 'assistant'" class="reasoning-content">
+              <div class="reasoning-label">思考内容：</div>
+              <pre class="reasoning-text">{{ message.reasoning }}</pre>
+            </div>
             <div class="message-text">{{ message.content }}</div>
             <div v-if="message.tool_calls" class="tool-calls">
               <div v-for="(tool, idx) in message.tool_calls" :key="idx" class="tool-call">
@@ -52,12 +69,17 @@
 <script setup>
 import { ref, nextTick, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
+import { Loading, ArrowDown, ArrowUp } from '@element-plus/icons-vue';
 import api from '@/api';
 
 const messages = ref([]);
 const inputMessage = ref('');
 const loading = ref(false);
 const messagesContainer = ref(null);
+
+function toggleReasoning(index) {
+  messages.value[index].showReasoning = !messages.value[index].showReasoning;
+}
 
 async function sendMessage() {
   if (!inputMessage.value.trim()) {
@@ -84,7 +106,9 @@ async function sendMessage() {
     messages.value.push({
       role: 'assistant',
       content: response.content,
-      tool_calls: response.tool_calls
+      reasoning: response.reasoning,
+      tool_calls: response.tool_calls,
+      showReasoning: false
     });
 
     await scrollToBottom();
@@ -167,6 +191,44 @@ onMounted(() => {
   font-size: 12px;
   margin-bottom: 4px;
   opacity: 0.8;
+}
+
+.reasoning-toggle {
+  margin-bottom: 8px;
+}
+
+.reasoning-toggle .el-button {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.reasoning-content {
+  margin-bottom: 12px;
+  padding: 10px;
+  background-color: #f8f9fa;
+  border-left: 3px solid #909399;
+  border-radius: 4px;
+}
+
+.reasoning-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #909399;
+  margin-bottom: 6px;
+}
+
+.reasoning-text {
+  margin: 0;
+  padding: 8px;
+  background-color: #fff;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #606266;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  max-height: 300px;
+  overflow-y: auto;
 }
 
 .message-text {

@@ -1,7 +1,8 @@
 # ============================================================================
 # Agent Executor Module
 # ============================================================================
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
+import re
 from app.core.llm_client import LLMClient
 from app.core.tool_manager import tool_manager
 from loguru import logger
@@ -12,6 +13,49 @@ class AgentExecutor:
 
     def __init__(self, llm_client: LLMClient):
         self.llm_client = llm_client
+
+    def _extract_reasoning(self, content: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+        """
+        从内容中提取思考内容
+
+        Args:
+            content: 原始内容
+
+        Returns:
+            (思考内容, 去除思考后的内容)
+        """
+        if not content:
+            return None, None
+
+        # 尝试多种格式的思考内容标签
+        patterns = [
+            (r'<thought>(.*?)</thought>', 'xml'),
+            (r'<think>(.*?)</think>', 'xml'),
+            (r'<reasoning>(.*?)</reasoning>', 'xml'),
+            (r'思考：(.*?)(?=\n\n|\Z)', 'text'),
+            (r'Reasoning:(.*?)(?=\n\n|\Z)', 'text'),
+            (r'Thought:(.*?)(?=\n\n|\Z)', 'text'),
+        ]
+
+        for pattern, ptype in patterns:
+            if ptype == 'xml':
+                matches = re.findall(pattern, content, re.DOTALL | re.IGNORECASE)
+                if matches:
+                    reasoning = '\n\n'.join(match.strip() for match in matches if match.strip())
+                    # 从内容中移除思考标签
+                    cleaned_content = re.sub(pattern, '', content, flags=re.DOTALL | re.IGNORECASE)
+                    cleaned_content = cleaned_content.strip()
+                    return reasoning, cleaned_content if cleaned_content else None
+            else:
+                match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
+                if match:
+                    reasoning = match.group(1).strip()
+                    cleaned_content = content[:match.start()].strip()
+                    if not cleaned_content:
+                        cleaned_content = content[match.end():].strip()
+                    return reasoning, cleaned_content if cleaned_content else None
+
+        return None, content
 
     async def execute(
         self,
@@ -56,10 +100,20 @@ class AgentExecutor:
                 message = choice["message"]
                 
                 tool_calls = message.get("tool_calls")
+                reasoning = message.get("reasoning")
+                content = message.get("content")
+                
+                # 如果 LLM 没有返回 reasoning 字段，尝试从 content 中提取
+                if not reasoning and content:
+                    extracted_reasoning, cleaned_content = self._extract_reasoning(content)
+                    if extracted_reasoning:
+                        reasoning = extracted_reasoning
+                        content = cleaned_content
                 
                 if not tool_calls:
                     return {
-                        "content": message.get("content"),
+                        "content": content,
+                        "reasoning": reasoning,
                         "tool_calls": None,
                         "finish_reason": choice["finish_reason"],
                         "usage": response["usage"],
@@ -68,7 +122,7 @@ class AgentExecutor:
                 
                 assistant_message = {
                     "role": "assistant",
-                    "content": message.get("content"),
+                    "content": content,
                     "tool_calls": tool_calls
                 }
                 messages.append(assistant_message)

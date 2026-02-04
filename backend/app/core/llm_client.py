@@ -69,6 +69,7 @@ class LLMClient:
                             "message": {
                                 "role": choice.message.role,
                                 "content": choice.message.content,
+                                "reasoning": getattr(choice.message, "reasoning", None) or getattr(choice.message, "reasoning_content", None),
                                 "tool_calls": [
                                     {
                                         "id": tc.id,
@@ -116,12 +117,26 @@ class LLMClient:
             response = await self.client.chat.completions.create(**kwargs)
 
             tool_call_buffer = {}
+            reasoning_buffer = ""
+            in_reasoning = False
             
             async for chunk in response:
                 delta = chunk.choices[0].delta if chunk.choices else None
                 
                 if delta:
+                    # 检查是否有 reasoning 字段
+                    if hasattr(delta, 'reasoning') and delta.reasoning:
+                        reasoning_buffer += delta.reasoning
+                        if not in_reasoning:
+                            in_reasoning = True
+                            yield "[REASONING_START]"
+                    
                     if hasattr(delta, 'content') and delta.content:
+                        # 如果之前在 reasoning 中，现在结束了
+                        if in_reasoning and reasoning_buffer:
+                            yield f"[REASONING_END]{reasoning_buffer}[/REASONING_END]"
+                            reasoning_buffer = ""
+                            in_reasoning = False
                         yield delta.content
                     
                     if hasattr(delta, 'tool_calls') and delta.tool_calls:
@@ -141,6 +156,10 @@ class LLMClient:
                                         tool_call_buffer[tool_name]["arguments"] += func.arguments
                     
                     if hasattr(chunk.choices[0], 'finish_reason') and chunk.choices[0].finish_reason:
+                        # 如果还有未输出的 reasoning
+                        if in_reasoning and reasoning_buffer:
+                            yield f"[REASONING_END]{reasoning_buffer}[/REASONING_END]"
+                        
                         for tool_name, tool_data in tool_call_buffer.items():
                             arguments_str = tool_data["arguments"]
                             try:
