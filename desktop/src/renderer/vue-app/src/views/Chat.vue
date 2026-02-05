@@ -19,11 +19,10 @@
                 <el-icon>
                   <component :is="message.showReasoning ? ArrowUp : ArrowDown" />
                 </el-icon>
-                {{ message.showReasoning ? '隐藏思考' : '显示思考' }}
+                思考
               </el-button>
             </div>
             <div v-if="message.reasoning && message.showReasoning && message.role === 'assistant'" class="reasoning-content">
-              <div class="reasoning-label">思考内容：</div>
               <pre class="reasoning-text">{{ message.reasoning }}</pre>
             </div>
             <div class="message-text">{{ message.content }}</div>
@@ -51,12 +50,12 @@
           type="textarea"
           :rows="3"
           placeholder="输入消息..."
-          @keydown.ctrl.enter="sendMessage"
+          @keydown.ctrl.enter="sendStreamMessage"
         />
         <el-button
           type="primary"
           :loading="loading"
-          @click="sendMessage"
+          @click="sendStreamMessage"
           style="margin-top: 10px; width: 100%"
         >
           发送 (Ctrl+Enter)
@@ -112,6 +111,117 @@ async function sendMessage() {
     });
 
     await scrollToBottom();
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '发送消息失败');
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function sendStreamMessage() {
+  if (!inputMessage.value.trim()) {
+    ElMessage.warning('请输入消息');
+    return;
+  }
+
+  const userMessage = inputMessage.value;
+  messages.value.push({
+    role: 'user',
+    content: userMessage
+  });
+  inputMessage.value = '';
+
+  await scrollToBottom();
+
+  loading.value = true;
+  const assistantMessage = {
+    role: 'assistant',
+    content: '',
+    reasoning: '',
+    tool_calls: [],
+    showReasoning: false
+  };
+  messages.value.push(assistantMessage);
+
+  let inReasoning = false;
+  let reasoningBuffer = '';
+  let contentBuffer = '';
+
+  try {
+    const response = await api.post('/agent/chat/stream', {
+      message: userMessage,
+      conversation_id: null
+    }, {
+      responseType: 'stream'
+    });
+
+    const reader = response.data.getReader();
+    const decoder = new TextDecoder();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value);
+      const lines = chunk.split('\n');
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          
+          if (data === '[DONE]') {
+            if (reasoningBuffer && !inReasoning) {
+              assistantMessage.reasoning = reasoningBuffer;
+            }
+            break;
+          }
+
+          if (data.startsWith('[ERROR:')) {
+            ElMessage.error(data.slice(7));
+            break;
+          }
+
+          if (data.startsWith('[TOOL_CALL:')) {
+            const toolCallMatch = data.match(/\[TOOL_CALL:(.+?):(.+)\]/);
+            if (toolCallMatch) {
+              assistantMessage.tool_calls.push({
+                function: {
+                  name: toolCallMatch[1],
+                  arguments: toolCallMatch[2]
+                }
+              });
+            }
+            continue;
+          }
+
+          if (data.includes('<思考>')) {
+            inReasoning = true;
+            reasoningBuffer = '';
+            continue;
+          }
+
+          if (data.includes('</思考>')) {
+            inReasoning = false;
+            assistantMessage.reasoning = reasoningBuffer;
+            reasoningBuffer = '';
+            continue;
+          }
+
+          if (inReasoning) {
+            reasoningBuffer += data;
+          } else {
+            assistantMessage.content += data;
+          }
+
+          await scrollToBottom();
+        }
+      }
+    }
+
+    if (assistantMessage.reasoning) {
+      assistantMessage.showReasoning = false;
+    }
+
   } catch (error) {
     ElMessage.error(error.response?.data?.detail || '发送消息失败');
   } finally {

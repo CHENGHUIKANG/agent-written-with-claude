@@ -23,6 +23,10 @@
             <el-icon><Tools /></el-icon>
             <span>LLM配置</span>
           </el-menu-item>
+          <el-menu-item index="logout" @click="handleLogout">
+            <el-icon><SwitchButton /></el-icon>
+            <span>登出</span>
+          </el-menu-item>
         </el-menu>
       </el-aside>
       <el-main>
@@ -36,6 +40,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
+import { ElMessage } from 'element-plus';
 
 const router = useRouter();
 const route = useRoute();
@@ -45,6 +50,12 @@ const activeMenu = computed(() => route.path);
 
 function handleMenuSelect(index) {
   router.push(index);
+}
+
+function handleLogout() {
+  authStore.clearAuth();
+  ElMessage.success('已登出');
+  router.push('/login');
 }
 
 function handleNewConversation() {

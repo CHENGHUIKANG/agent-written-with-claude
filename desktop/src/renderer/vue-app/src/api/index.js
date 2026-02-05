@@ -1,4 +1,7 @@
 import axios from 'axios';
+import { useAuthStore } from '@/stores/auth';
+
+let authStore = null;
 
 const api = axios.create({
   baseURL: 'http://localhost:8000/api/v1',
@@ -10,7 +13,10 @@ const api = axios.create({
 
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
+    if (!authStore) {
+      authStore = useAuthStore();
+    }
+    const token = authStore.token || localStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -29,8 +35,13 @@ api.interceptors.response.use(
     if (error.response) {
       switch (error.response.status) {
         case 401:
-          localStorage.removeItem('token');
-          window.location.hash = '/login';
+          if (!authStore) {
+            authStore = useAuthStore();
+          }
+          authStore.clearAuth();
+          if (window.location.hash !== '#/login') {
+            window.location.hash = '/login';
+          }
           break;
         case 403:
           console.error('没有权限访问');

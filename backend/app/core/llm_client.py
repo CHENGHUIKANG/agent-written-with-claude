@@ -119,6 +119,7 @@ class LLMClient:
             tool_call_buffer = {}
             reasoning_buffer = ""
             in_reasoning = False
+            in_content = False
             
             async for chunk in response:
                 delta = chunk.choices[0].delta if chunk.choices else None
@@ -126,17 +127,23 @@ class LLMClient:
                 if delta:
                     # 检查是否有 reasoning 字段
                     if hasattr(delta, 'reasoning') and delta.reasoning:
-                        reasoning_buffer += delta.reasoning
                         if not in_reasoning:
                             in_reasoning = True
-                            yield "[REASONING_START]"
+                            yield "<思考>"
+                            in_content = False
+                        reasoning_buffer += delta.reasoning
                     
                     if hasattr(delta, 'content') and delta.content:
                         # 如果之前在 reasoning 中，现在结束了
-                        if in_reasoning and reasoning_buffer:
-                            yield f"[REASONING_END]{reasoning_buffer}[/REASONING_END]"
+                        if in_reasoning:
+                            yield f"{reasoning_buffer}"
+                            yield "</思考>"
                             reasoning_buffer = ""
                             in_reasoning = False
+                        
+                        if not in_content:
+                            in_content = True
+                        
                         yield delta.content
                     
                     if hasattr(delta, 'tool_calls') and delta.tool_calls:
@@ -157,8 +164,9 @@ class LLMClient:
                     
                     if hasattr(chunk.choices[0], 'finish_reason') and chunk.choices[0].finish_reason:
                         # 如果还有未输出的 reasoning
-                        if in_reasoning and reasoning_buffer:
-                            yield f"[REASONING_END]{reasoning_buffer}[/REASONING_END]"
+                        if in_reasoning:
+                            yield f"{reasoning_buffer}"
+                            yield "</思考>"
                         
                         for tool_name, tool_data in tool_call_buffer.items():
                             arguments_str = tool_data["arguments"]

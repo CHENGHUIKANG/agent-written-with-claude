@@ -1,5 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router';
 import Layout from '@/layout/index.vue';
+import { useAuthStore } from '@/stores/auth';
 
 const routes = [
   {
@@ -11,19 +12,19 @@ const routes = [
         path: 'chat',
         name: 'Chat',
         component: () => import('@/views/Chat.vue'),
-        meta: { title: '对话' }
+        meta: { title: '对话', requiresAuth: true }
       },
       {
         path: 'config',
         name: 'Config',
         component: () => import('@/views/Config.vue'),
-        meta: { title: '配置' }
+        meta: { title: '配置', requiresAuth: true }
       },
       {
         path: 'mcp',
         name: 'MCP',
         component: () => import('@/views/MCP.vue'),
-        meta: { title: 'MCP配置' }
+        meta: { title: 'MCP配置', requiresAuth: true }
       }
     ]
   },
@@ -42,7 +43,16 @@ const router = createRouter({
 
 router.beforeEach((to, from, next) => {
   document.title = to.meta.title ? `${to.meta.title} - Agent App` : 'Agent App';
-  next();
+  
+  const authStore = useAuthStore();
+  
+  if (to.meta.requiresAuth && !authStore.isAuthenticated()) {
+    next('/login');
+  } else if (to.path === '/login' && authStore.isAuthenticated()) {
+    next('/');
+  } else {
+    next();
+  }
 });
 
 export default router;

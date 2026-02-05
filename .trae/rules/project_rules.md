@@ -9,5 +9,7 @@
   - Code Tasks: Refer to @/documents/FASTAPI_PYTHON_RULES.MD
 
   - UI Design Tasks: Refer to @/documents/UIUX_DESIGN.MD
-
+  
   Please try to communicate with me in Chinese as much as possible.  
+
+  Remember to execute the corresponding skills in the skill library.
