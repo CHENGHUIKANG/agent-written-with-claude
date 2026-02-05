@@ -203,36 +203,74 @@ class AgentExecutor:
                     messages=messages,
                     tools=tools
                 ):
+                    logger.info(f"[Agent] 收到 chunk: '{chunk[:100]}...' " if len(chunk) > 100 else f"[Agent] 收到 chunk: '{chunk}'")
+                    
                     if chunk.startswith("[TOOL_CALL:"):
+                        logger.info(f"[Agent] 检测到工具调用: {chunk}")
                         tool_calls_buffer.append(chunk)
                     elif chunk == "[DONE]":
+                        logger.info(f"[Agent] 收到 [DONE], 工具调用缓冲区: {tool_calls_buffer}")
                         if tool_calls_buffer:
                             for tool_call_str in tool_calls_buffer:
                                 try:
                                     import json
-                                    match = tool_call_str.replace("[TOOL_CALL:", "").replace("]", "")
+                                    import re
                                     
-                                    if ":" in match:
-                                        parts = match.split(":", 1)
-                                        tool_name = parts[0]
-                                        tool_arguments_str = parts[1] if len(parts) > 1 else "{}"
+                                    logger.info(f"[Agent] 解析工具调用: {tool_call_str}")
+                                    
+                                    # 使用正则表达式解析 [TOOL_CALL:tool_name:{...}]
+                                    # 工具名是字母数字下划线，参数是 JSON 对象
+                                    match = re.match(r'\[TOOL_CALL:([a-zA-Z_][a-zA-Z0-9_]*):(.*)\]', tool_call_str)
+                                    if match:
+                                        tool_name = match.group(1)
+                                        tool_arguments_str = match.group(2)
+                                        logger.info(f"[Agent] 正则匹配成功: 工具名={tool_name}, 参数={tool_arguments_str}")
                                     else:
-                                        tool_name = match
-                                        tool_arguments_str = "{}"
+                                        logger.warning(f"[Agent] 正则匹配失败，回退到简单解析: {tool_call_str}")
+                                        # 回退到简单解析
+                                        content = tool_call_str[12:]  # len("[TOOL_CALL:") = 12
+                                        if content.endswith(']'):
+                                            content = content[:-1]
+                                        
+                                        if ":" in content:
+                                            colon_idx = content.find(':')
+                                            tool_name = content[:colon_idx]
+                                            tool_arguments_str = content[colon_idx + 1:]
+                                        else:
+                                            tool_name = content
+                                            tool_arguments_str = "{}"
+                                        logger.info(f"[Agent] 简单解析结果: 工具名={tool_name}, 参数={tool_arguments_str}")
                                     
                                     try:
                                         arguments = json.loads(tool_arguments_str)
-                                    except json.JSONDecodeError:
-                                        arguments = tool_arguments_buffer
+                                        logger.info(f"[Agent] JSON 解析成功: {arguments}")
+                                    except json.JSONDecodeError as e:
+                                        logger.warning(f"[Agent] JSON 解析失败: {e}, 尝试修复")
+                                        # 尝试修复 JSON
+                                        try:
+                                            # 可能是缺少闭合括号
+                                            if not tool_arguments_str.strip().endswith('}'):
+                                                tool_arguments_str = tool_arguments_str + '}'
+                                            arguments = json.loads(tool_arguments_str)
+                                            logger.info(f"[Agent] JSON 修复成功: {arguments}")
+                                        except Exception as e2:
+                                            logger.error(f"[Agent] JSON 修复失败: {e2}, 使用空对象")
+                                            # 如果仍然失败，使用空对象
+                                            arguments = {}
                                     
-                                    if not arguments:
-                                        arguments = {}
-                                    
-                                    logger.info(f"执行工具: {tool_name}, 参数: {arguments}")
+                                    logger.info(f"[Agent] 执行工具: {tool_name}, 参数: {arguments}")
                                     
                                     tool_result = await tool_manager.execute_tool(tool_name, arguments)
+                                    logger.info(f"[Agent] 工具执行结果: {tool_result}")
                                     
-                                    yield f"[TOOL_RESULT:{tool_name}:{json.dumps(tool_result)}]"
+                                    # 确保工具结果可以被 JSON 序列化
+                                    try:
+                                        tool_result_json = json.dumps(tool_result)
+                                    except (TypeError, ValueError) as e:
+                                        logger.warning(f"[Agent] 工具结果 JSON 序列化失败: {e}, 转换为字符串")
+                                        tool_result_json = json.dumps({"success": True, "result": str(tool_result)})
+                                    
+                                    yield f"[TOOL_RESULT:{tool_name}:{tool_result_json}]"
                                     
                                     messages.append({
                                         "role": "assistant",
@@ -254,7 +292,7 @@ class AgentExecutor:
                                         "content": str(tool_result)
                                     })
                                 except Exception as e:
-                                    logger.error(f"处理工具调用失败: {str(e)}")
+                                    logger.error(f"[Agent] 处理工具调用失败: {str(e)}")
                                     yield f"[ERROR:工具调用失败: {str(e)}]"
                             
                             tool_calls_buffer = []

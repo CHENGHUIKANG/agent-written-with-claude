@@ -39,12 +39,16 @@ async def web_search(
         total_results = 0
         
         with DDGS() as ddgs:
-            search_results = list(ddgs.text(
-                query,
-                max_results=max_results,
-                region=region,
-                time=time
-            ))
+            # 构建搜索参数，只传递非 None 的参数
+            search_kwargs = {
+                "keywords": query,
+                "max_results": max_results,
+                "region": region
+            }
+            if time:
+                search_kwargs["timelimit"] = time
+            
+            search_results = list(ddgs.text(**search_kwargs))
             
             for result in search_results:
                 results.append({

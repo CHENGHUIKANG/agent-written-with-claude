@@ -185,8 +185,11 @@ class ToolManager:
                 content = result["content"]
                 if isinstance(content, list) and len(content) > 0:
                     content = content[0]
+                    # 处理 TextContent 对象
+                    if hasattr(content, 'text'):
+                        return json.loads(content.text) if isinstance(content.text, str) else content.text
                     if isinstance(content, dict) and "text" in content:
-                        return content["text"]
+                        return json.loads(content["text"]) if isinstance(content["text"], str) else content["text"]
                     return content
                 return content
             

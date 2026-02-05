@@ -22,7 +22,7 @@
                 思考
               </el-button>
             </div>
-            <div v-if="message.reasoning && message.showReasoning && message.role === 'assistant'" class="reasoning-content">
+            <div v-if="message.reasoning && (message.showReasoning !== false) && message.role === 'assistant'" class="reasoning-content">
               <pre class="reasoning-text">{{ message.reasoning }}</pre>
             </div>
             <div class="message-text">{{ message.content }}</div>
@@ -133,45 +133,75 @@ async function sendStreamMessage() {
 
   await scrollToBottom();
 
-  loading.value = true;
-  const assistantMessage = {
+  // 使用 ref 创建响应式消息对象，确保实时更新
+  const assistantMessageIndex = messages.value.length;
+  messages.value.push({
     role: 'assistant',
     content: '',
     reasoning: '',
     tool_calls: [],
-    showReasoning: false
-  };
-  messages.value.push(assistantMessage);
+    showReasoning: true  // 默认显示思考内容，用户可以点击按钮隐藏
+  });
+
+  // 流式接收过程中不需要显示 loading，因为已经有 AI 消息框在实时更新了
+  loading.value = false;
 
   let inReasoning = false;
   let reasoningBuffer = '';
   let contentBuffer = '';
+  let buffer = '';
+
+  // 强制更新消息的辅助函数
+  const updateMessage = (updates) => {
+    const msg = messages.value[assistantMessageIndex];
+    Object.assign(msg, updates);
+    // 强制触发 Vue 响应式更新
+    messages.value = [...messages.value];
+  };
 
   try {
-    const response = await api.post('/agent/chat/stream', {
-      message: userMessage,
-      conversation_id: null
-    }, {
-      responseType: 'stream'
+    // 使用 Fetch API 处理 SSE 流式响应
+    const authStore = JSON.parse(localStorage.getItem('auth') || '{}');
+    const token = authStore.token || localStorage.getItem('token');
+
+    const response = await fetch('http://localhost:8000/api/v1/agent/chat/stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : ''
+      },
+      body: JSON.stringify({
+        message: userMessage,
+        conversation_id: null
+      })
     });
 
-    const reader = response.data.getReader();
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || '发送消息失败');
+    }
+
+    const reader = response.body.getReader();
     const decoder = new TextDecoder();
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
+      const chunk = decoder.decode(value, { stream: true });
+      buffer += chunk;
+
+      // 处理缓冲区中的完整行
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
 
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           const data = line.slice(6);
-          
+
           if (data === '[DONE]') {
             if (reasoningBuffer && !inReasoning) {
-              assistantMessage.reasoning = reasoningBuffer;
+              updateMessage({ reasoning: reasoningBuffer });
             }
             break;
           }
@@ -184,46 +214,74 @@ async function sendStreamMessage() {
           if (data.startsWith('[TOOL_CALL:')) {
             const toolCallMatch = data.match(/\[TOOL_CALL:(.+?):(.+)\]/);
             if (toolCallMatch) {
-              assistantMessage.tool_calls.push({
-                function: {
-                  name: toolCallMatch[1],
-                  arguments: toolCallMatch[2]
-                }
+              const currentTools = messages.value[assistantMessageIndex].tool_calls || [];
+              updateMessage({
+                tool_calls: [...currentTools, {
+                  function: {
+                    name: toolCallMatch[1],
+                    arguments: toolCallMatch[2]
+                  }
+                }]
               });
             }
             continue;
           }
 
-          if (data.includes('<思考>')) {
+          if (data.includes('<think>')) {
             inReasoning = true;
             reasoningBuffer = '';
             continue;
           }
 
-          if (data.includes('</思考>')) {
+          if (data.includes('</think>')) {
             inReasoning = false;
-            assistantMessage.reasoning = reasoningBuffer;
+            updateMessage({ reasoning: reasoningBuffer });
             reasoningBuffer = '';
             continue;
           }
 
           if (inReasoning) {
             reasoningBuffer += data;
+            // 实时更新思考内容
+            updateMessage({ reasoning: reasoningBuffer });
           } else {
-            assistantMessage.content += data;
+            contentBuffer += data;
+            // 实时更新内容
+            updateMessage({ content: contentBuffer });
           }
 
-          await scrollToBottom();
+          // 使用 requestAnimationFrame 优化滚动性能
+          requestAnimationFrame(() => {
+            scrollToBottom();
+          });
         }
       }
     }
 
-    if (assistantMessage.reasoning) {
-      assistantMessage.showReasoning = false;
+    // 处理剩余缓冲区
+    if (buffer.startsWith('data: ')) {
+      const data = buffer.slice(6);
+      if (!data.startsWith('[') && !data.includes('<think>') && !data.includes('</think>')) {
+        if (inReasoning) {
+          reasoningBuffer += data;
+          updateMessage({ reasoning: reasoningBuffer });
+        } else {
+          contentBuffer += data;
+          updateMessage({ content: contentBuffer });
+        }
+      }
+    }
+
+    // 最终更新
+    const finalUpdates = {};
+    if (reasoningBuffer) finalUpdates.reasoning = reasoningBuffer;
+    if (contentBuffer) finalUpdates.content = contentBuffer;
+    if (Object.keys(finalUpdates).length > 0) {
+      updateMessage(finalUpdates);
     }
 
   } catch (error) {
-    ElMessage.error(error.response?.data?.detail || '发送消息失败');
+    ElMessage.error(error.message || '发送消息失败');
   } finally {
     loading.value = false;
   }
