@@ -260,37 +260,37 @@ class AgentExecutor:
                                     
                                     logger.info(f"[Agent] 执行工具: {tool_name}, 参数: {arguments}")
                                     
-                                    tool_result = await tool_manager.execute_tool(tool_name, arguments)
-                                    logger.info(f"[Agent] 工具执行结果: {tool_result}")
-                                    
-                                    # 确保工具结果可以被 JSON 序列化
+                                    # 执行工具并获取结果
                                     try:
-                                        tool_result_json = json.dumps(tool_result)
-                                    except (TypeError, ValueError) as e:
-                                        logger.warning(f"[Agent] 工具结果 JSON 序列化失败: {e}, 转换为字符串")
-                                        tool_result_json = json.dumps({"success": True, "result": str(tool_result)})
-                                    
-                                    yield f"[TOOL_RESULT:{tool_name}:{tool_result_json}]"
-                                    
-                                    messages.append({
-                                        "role": "assistant",
-                                        "content": current_content,
-                                        "tool_calls": [{
-                                            "id": f"call_{iteration}_{len(tool_calls_buffer)}",
-                                            "type": "function",
-                                            "function": {
-                                                "name": tool_name,
-                                                "arguments": tool_arguments_str
-                                            }
-                                        }]
-                                    })
-                                    
-                                    messages.append({
-                                        "role": "tool",
-                                        "tool_call_id": f"call_{iteration}_{len(tool_calls_buffer)}",
-                                        "name": tool_name,
-                                        "content": str(tool_result)
-                                    })
+                                        tool_result = await tool_manager.execute_tool(tool_name, arguments)
+                                        logger.info(f"[Agent] 工具执行结果: {tool_result}")
+                                        
+                                        # 生成简洁的状态消息
+                                        status_message = f"【{tool_name}】执行成功"
+                                        
+                                        # 向前端返回简洁状态
+                                        yield f"[TOOL_STATUS:{status_message}]"
+                                        
+                                        # 将工具结果转换为JSON格式传给大模型
+                                        try:
+                                            tool_result_json = json.dumps(tool_result)
+                                        except (TypeError, ValueError) as e:
+                                            logger.warning(f"[Agent] 工具结果 JSON 序列化失败: {e}, 转换为字符串")
+                                            tool_result_json = json.dumps({"success": True, "result": str(tool_result)})
+                                        
+                                        # 准备工具结果消息给大模型
+                                        tool_message = {
+                                            "role": "tool",
+                                            "tool_call_id": f"call_{iteration}_{len(tool_calls_buffer)}",
+                                            "name": tool_name,
+                                            "content": tool_result_json
+                                        }
+                                        messages.append(tool_message)
+                                        
+                                    except Exception as tool_error:
+                                        logger.error(f"[Agent] 工具执行失败: {tool_error}")
+                                        status_message = f"【{tool_name}】执行失败"
+                                        yield f"[TOOL_STATUS:{status_message}]"
                                 except Exception as e:
                                     logger.error(f"[Agent] 处理工具调用失败: {str(e)}")
                                     yield f"[ERROR:工具调用失败: {str(e)}]"

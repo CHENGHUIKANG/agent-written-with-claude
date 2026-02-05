@@ -32,6 +32,10 @@
                 <pre>{{ tool.function.arguments }}</pre>
               </div>
             </div>
+            <!-- 显示工具执行状态 -->
+            <div v-if="message.tool_status" class="tool-status">
+              <el-tag size="small" type="success">{{ message.tool_status }}</el-tag>
+            </div>
           </div>
         </div>
         <div v-if="loading" class="message assistant">
@@ -140,6 +144,7 @@ async function sendStreamMessage() {
     content: '',
     reasoning: '',
     tool_calls: [],
+    tool_status: '', // 添加工具状态字段
     showReasoning: true  // 默认显示思考内容，用户可以点击按钮隐藏
   });
 
@@ -227,6 +232,22 @@ async function sendStreamMessage() {
             continue;
           }
 
+          // 处理工具状态消息
+          if (data.startsWith('[TOOL_STATUS:')) {
+            const statusMatch = data.match(/\[TOOL_STATUS:(.*)\]/);
+            if (statusMatch) {
+              const statusText = statusMatch[1];
+              updateMessage({ tool_status: statusText });
+            }
+            continue;
+          }
+
+          // 处理工具结果消息（保持兼容性）
+          if (data.startsWith('[TOOL_RESULT:')) {
+            logger.info('收到工具结果:', data);
+            continue;
+          }
+
           if (data.includes('<think>')) {
             inReasoning = true;
             reasoningBuffer = '';
@@ -297,7 +318,8 @@ async function scrollToBottom() {
 onMounted(() => {
   messages.value.push({
     role: 'assistant',
-    content: '你好！我是 AI 助手，有什么可以帮助你的吗？'
+    content: '你好！我是 AI 助手，有什么可以帮助你的吗？',
+    tool_status: ''
   });
 });
 </script>
@@ -421,6 +443,11 @@ onMounted(() => {
   border-radius: 4px;
   font-size: 12px;
   overflow-x: auto;
+}
+
+.tool-status {
+  margin-top: 8px;
+  padding: 4px 0;
 }
 
 .chat-input {
