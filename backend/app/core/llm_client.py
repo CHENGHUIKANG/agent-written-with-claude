@@ -101,6 +101,14 @@ class LLMClient:
         tools: Optional[List[Dict[str, Any]]] = None
     ) -> AsyncGenerator[str, None]:
         """流式聊天完成请求"""
+        from loguru import logger
+        
+        logger.info("=" * 60)
+        logger.info("[LLM] ========== 开始流式聊天完成 ==========")
+        logger.info(f"[LLM] 模型: {self.model_name}")
+        logger.info(f"[LLM] 消息数量: {len(messages)}")
+        logger.info(f"[LLM] 工具数量: {len(tools) if tools else 0}")
+        
         try:
             kwargs = {
                 "model": self.model_name,
@@ -113,8 +121,11 @@ class LLMClient:
 
             if tools:
                 kwargs["tools"] = tools
+                logger.info(f"[LLM] 可用工具: {[t.get('function', {}).get('name', 'unknown') for t in tools]}")
 
+            logger.info("[LLM] 调用 LLM API...")
             response = await self.client.chat.completions.create(**kwargs)
+            logger.info("[LLM] LLM API 连接成功, 开始接收流式数据...")
 
             # 使用 index 作为 key 来累积工具调用数据
             tool_call_buffer = {}
@@ -225,9 +236,11 @@ class LLMClient:
                                     tool_call_msg = f"[TOOL_CALL:{tool_name}:{{}}]"
                                     yield tool_call_msg
                         
+                        logger.info("[LLM] 流式响应完成, 发送 [DONE]")
                         yield "[DONE]"
                         
         except Exception as e:
+            logger.error(f"[LLM] 流式处理异常: {str(e)}")
             yield f"[ERROR:{str(e)}]"
 
     @staticmethod

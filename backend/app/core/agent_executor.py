@@ -178,37 +178,54 @@ class AgentExecutor:
         Yields:
             流式响应内容
         """
+        logger.info("=" * 60)
+        logger.info("[Agent] ========== 开始流式执行 ==========")
+        logger.info(f"[Agent] 用户消息: {user_message}")
+        logger.info(f"[Agent] 可用工具数量: {len(tools) if tools else 0}")
+        if tools:
+            for tool in tools:
+                tool_name = tool.get("function", {}).get("name", "unknown")
+                logger.info(f"[Agent]   - {tool_name}")
+        
         messages = []
         
         system_prompt = self._build_system_prompt(tools)
         messages.append({"role": "system", "content": system_prompt})
         
         if conversation_history:
+            logger.info(f"[Agent] 对话历史长度: {len(conversation_history)}")
             messages.extend(conversation_history)
         
         messages.append({"role": "user", "content": user_message})
+        logger.info(f"[Agent] 消息列表长度: {len(messages)}")
         
         max_iterations = 10
         iteration = 0
         
         while iteration < max_iterations:
             iteration += 1
+            logger.info(f"[Agent] ========== 迭代 {iteration}/{max_iterations} ==========")
             
             try:
                 tool_calls_buffer = []
                 current_content = ""
                 tool_arguments_buffer = {}
+                chunk_count = 0
                 
+                logger.info("[Agent] 开始调用LLM流式接口...")
                 async for chunk in self.llm_client.stream_chat_completion(
                     messages=messages,
                     tools=tools
                 ):
-                    logger.info(f"[Agent] 收到 chunk: '{chunk[:100]}...' " if len(chunk) > 100 else f"[Agent] 收到 chunk: '{chunk}'")
+                    chunk_count += 1
+                    if chunk_count <= 5 or chunk_count % 10 == 0:
+                        logger.info(f"[Agent] 收到第{chunk_count}个chunk, 长度: {len(chunk)}, 内容: '{chunk[:100]}...' " if len(chunk) > 100 else f"[Agent] 收到第{chunk_count}个chunk: '{chunk}'")
                     
                     if chunk.startswith("[TOOL_CALL:"):
                         logger.info(f"[Agent] 检测到工具调用: {chunk}")
                         tool_calls_buffer.append(chunk)
                     elif chunk == "[DONE]":
+                        logger.info(f"[Agent] 收到 [DONE], 总chunk数: {chunk_count}")
                         logger.info(f"[Agent] 收到 [DONE], 工具调用缓冲区: {tool_calls_buffer}")
                         if tool_calls_buffer:
                             for tool_call_str in tool_calls_buffer:
@@ -286,6 +303,7 @@ class AgentExecutor:
                                             "content": tool_result_json
                                         }
                                         messages.append(tool_message)
+                                        logger.info(f"[Agent] 工具结果已添加到消息列表, 当前消息数: {len(messages)}")
                                         
                                     except Exception as tool_error:
                                         logger.error(f"[Agent] 工具执行失败: {tool_error}")
@@ -295,13 +313,17 @@ class AgentExecutor:
                                     logger.error(f"[Agent] 处理工具调用失败: {str(e)}")
                                     yield f"[ERROR:工具调用失败: {str(e)}]"
                             
+                            logger.info(f"[Agent] 所有工具调用处理完成, 共处理 {len(tool_calls_buffer)} 个工具")
                             tool_calls_buffer = []
                             current_content = ""
                             tool_arguments_buffer = {}
+                            logger.info("[Agent] 继续下一轮迭代, 让大模型基于工具结果生成回答...")
                         else:
+                            logger.info("[Agent] 无工具调用, 流式响应结束")
                             yield chunk
                             return
                     elif chunk.startswith("[ERROR:"):
+                        logger.error(f"[Agent] 收到错误标记: {chunk}")
                         yield chunk
                         return
                     else:
@@ -309,13 +331,15 @@ class AgentExecutor:
                         yield chunk
                 
                 if not tool_calls_buffer:
+                    logger.info("[Agent] 迭代完成, 无更多工具调用")
                     return
                     
             except Exception as e:
-                logger.error(f"Agent 流式执行失败: {str(e)}")
+                logger.error(f"[Agent] Agent 流式执行失败: {str(e)}")
                 yield f"[ERROR:Agent 流式执行失败: {str(e)}]"
                 return
         
+        logger.error(f"[Agent] 达到最大迭代次数 {max_iterations}, 任务未完成")
         yield "[ERROR:达到最大迭代次数，任务未完成]"
 
     def _build_system_prompt(self, tools: Optional[List[Dict[str, Any]]]) -> str:

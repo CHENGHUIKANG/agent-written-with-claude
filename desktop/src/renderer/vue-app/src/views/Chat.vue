@@ -129,6 +129,9 @@ async function sendStreamMessage() {
   }
 
   const userMessage = inputMessage.value;
+  console.log('[Chat] ========== 开始发送消息 ==========');
+  console.log('[Chat] 用户消息:', userMessage);
+
   messages.value.push({
     role: 'user',
     content: userMessage
@@ -139,6 +142,8 @@ async function sendStreamMessage() {
 
   // 使用 ref 创建响应式消息对象，确保实时更新
   const assistantMessageIndex = messages.value.length;
+  console.log('[Chat] 创建AI消息, 索引:', assistantMessageIndex);
+
   messages.value.push({
     role: 'assistant',
     content: '',
@@ -165,6 +170,7 @@ async function sendStreamMessage() {
   };
 
   try {
+    console.log('[Chat] 发起流式请求到后端...');
     // 使用 Fetch API 处理 SSE 流式响应
     const authStore = JSON.parse(localStorage.getItem('auth') || '{}');
     const token = authStore.token || localStorage.getItem('token');
@@ -181,19 +187,30 @@ async function sendStreamMessage() {
       })
     });
 
+    console.log('[Chat] 收到响应, status:', response.status);
+
     if (!response.ok) {
       const errorData = await response.json();
+      console.error('[Chat] 请求失败:', errorData);
       throw new Error(errorData.detail || '发送消息失败');
     }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
+    let chunkCount = 0;
+
+    console.log('[Chat] 开始读取流式数据...');
 
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        console.log('[Chat] 流式数据读取完成, 总块数:', chunkCount);
+        break;
+      }
 
+      chunkCount++;
       const chunk = decoder.decode(value, { stream: true });
+      console.log(`[Chat] 收到第${chunkCount}块数据, 长度:`, chunk.length);
       buffer += chunk;
 
       // 处理缓冲区中的完整行
@@ -203,8 +220,10 @@ async function sendStreamMessage() {
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           const data = line.slice(6);
+          console.log('[Chat] 处理数据:', data.substring(0, 100));
 
           if (data === '[DONE]') {
+            console.log('[Chat] 收到 [DONE] 标记');
             if (reasoningBuffer && !inReasoning) {
               updateMessage({ reasoning: reasoningBuffer });
             }
@@ -212,14 +231,17 @@ async function sendStreamMessage() {
           }
 
           if (data.startsWith('[ERROR:')) {
+            console.error('[Chat] 收到错误:', data);
             ElMessage.error(data.slice(7));
             break;
           }
 
           if (data.startsWith('[TOOL_CALL:')) {
+            console.log('[Chat] 收到工具调用:', data);
             const toolCallMatch = data.match(/\[TOOL_CALL:(.+?):(.+)\]/);
             if (toolCallMatch) {
               const currentTools = messages.value[assistantMessageIndex].tool_calls || [];
+              console.log('[Chat] 添加工具调用:', toolCallMatch[1]);
               updateMessage({
                 tool_calls: [...currentTools, {
                   function: {
@@ -234,9 +256,11 @@ async function sendStreamMessage() {
 
           // 处理工具状态消息
           if (data.startsWith('[TOOL_STATUS:')) {
+            console.log('[Chat] 收到工具状态:', data);
             const statusMatch = data.match(/\[TOOL_STATUS:(.*)\]/);
             if (statusMatch) {
               const statusText = statusMatch[1];
+              console.log('[Chat] 更新工具状态:', statusText);
               updateMessage({ tool_status: statusText });
             }
             continue;
@@ -244,17 +268,19 @@ async function sendStreamMessage() {
 
           // 处理工具结果消息（保持兼容性）
           if (data.startsWith('[TOOL_RESULT:')) {
-            logger.info('收到工具结果:', data);
+            console.log('[Chat] 收到工具结果:', data.substring(0, 100));
             continue;
           }
 
           if (data.includes('<think>')) {
+            console.log('[Chat] 进入思考模式');
             inReasoning = true;
             reasoningBuffer = '';
             continue;
           }
 
           if (data.includes('</think>')) {
+            console.log('[Chat] 退出思考模式, 思考内容长度:', reasoningBuffer.length);
             inReasoning = false;
             updateMessage({ reasoning: reasoningBuffer });
             reasoningBuffer = '';
@@ -282,6 +308,7 @@ async function sendStreamMessage() {
     // 处理剩余缓冲区
     if (buffer.startsWith('data: ')) {
       const data = buffer.slice(6);
+      console.log('[Chat] 处理剩余缓冲区:', data.substring(0, 50));
       if (!data.startsWith('[') && !data.includes('<think>') && !data.includes('</think>')) {
         if (inReasoning) {
           reasoningBuffer += data;
@@ -294,6 +321,10 @@ async function sendStreamMessage() {
     }
 
     // 最终更新
+    console.log('[Chat] ========== 流式响应结束 ==========');
+    console.log('[Chat] 最终内容长度:', contentBuffer.length);
+    console.log('[Chat] 最终思考长度:', reasoningBuffer.length);
+
     const finalUpdates = {};
     if (reasoningBuffer) finalUpdates.reasoning = reasoningBuffer;
     if (contentBuffer) finalUpdates.content = contentBuffer;
@@ -302,9 +333,11 @@ async function sendStreamMessage() {
     }
 
   } catch (error) {
+    console.error('[Chat] 发送消息失败:', error);
     ElMessage.error(error.message || '发送消息失败');
   } finally {
     loading.value = false;
+    console.log('[Chat] loading状态已重置');
   }
 }
 
