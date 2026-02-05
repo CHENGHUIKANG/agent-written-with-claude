@@ -317,7 +317,9 @@ class AgentExecutor:
                             tool_calls_buffer = []
                             current_content = ""
                             tool_arguments_buffer = {}
-                            logger.info("[Agent] 继续下一轮迭代, 让大模型基于工具结果生成回答...")
+                            # 处理完工具后，跳出LLM循环，继续外层迭代
+                            logger.info("[Agent] 工具调用处理完成，跳出LLM循环，准备下一轮迭代")
+                            break
                         else:
                             logger.info("[Agent] 无工具调用, 流式响应结束")
                             yield chunk

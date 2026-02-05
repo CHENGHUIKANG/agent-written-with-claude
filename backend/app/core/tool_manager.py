@@ -187,9 +187,21 @@ class ToolManager:
                     content = content[0]
                     # 处理 TextContent 对象
                     if hasattr(content, 'text'):
-                        return json.loads(content.text) if isinstance(content.text, str) else content.text
+                        text_value = content.text
+                        # 尝试解析为 JSON，如果不是则直接返回文本
+                        try:
+                            return json.loads(text_value) if isinstance(text_value, str) else text_value
+                        except (json.JSONDecodeError, TypeError):
+                            return {"text": text_value}
                     if isinstance(content, dict) and "text" in content:
-                        return json.loads(content["text"]) if isinstance(content["text"], str) else content["text"]
+                        text_value = content["text"]
+                        try:
+                            return json.loads(text_value) if isinstance(text_value, str) else text_value
+                        except (json.JSONDecodeError, TypeError):
+                            return {"text": text_value}
+                    # 如果是其他对象类型，转换为字典
+                    if hasattr(content, '__dict__'):
+                        return {"result": str(content)}
                     return content
                 return content
             
