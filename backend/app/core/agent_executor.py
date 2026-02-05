@@ -211,6 +211,7 @@ class AgentExecutor:
                 current_content = ""
                 tool_arguments_buffer = {}
                 chunk_count = 0
+                tool_calls_executed = False  # 标记本轮是否执行了工具调用
                 
                 logger.info("[Agent] 开始调用LLM流式接口...")
                 async for chunk in self.llm_client.stream_chat_completion(
@@ -317,6 +318,7 @@ class AgentExecutor:
                             tool_calls_buffer = []
                             current_content = ""
                             tool_arguments_buffer = {}
+                            tool_calls_executed = True  # 标记执行了工具调用
                             # 处理完工具后，跳出LLM循环，继续外层迭代
                             logger.info("[Agent] 工具调用处理完成，跳出LLM循环，准备下一轮迭代")
                             break
@@ -332,8 +334,12 @@ class AgentExecutor:
                         current_content += chunk
                         yield chunk
                 
-                if not tool_calls_buffer:
-                    logger.info("[Agent] 迭代完成, 无更多工具调用")
+                # 判断是否需要继续迭代：只有执行了工具调用才继续，否则说明是正常响应完成
+                if tool_calls_executed:
+                    logger.info("[Agent] 本轮执行了工具调用，继续下一轮迭代让LLM生成总结...")
+                    continue
+                else:
+                    logger.info("[Agent] 本轮无工具调用，流式响应完成")
                     return
                     
             except Exception as e:

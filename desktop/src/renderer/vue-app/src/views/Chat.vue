@@ -26,15 +26,17 @@
               <pre class="reasoning-text">{{ message.reasoning }}</pre>
             </div>
             <div class="message-text">{{ message.content }}</div>
-            <div v-if="message.tool_calls" class="tool-calls">
+            <!-- 显示工具执行状态 -->
+            <div v-if="message.tool_status" class="tool-status">
+              <el-tag size="small" type="success">{{ message.tool_status }}</el-tag>
+            </div>
+            <!-- 工具调用详情（调试信息） -->
+            <div v-if="message.tool_calls && message.tool_calls.length > 0" class="tool-calls">
+              <div class="tool-calls-title">工具调用详情:</div>
               <div v-for="(tool, idx) in message.tool_calls" :key="idx" class="tool-call">
                 <el-tag size="small" type="info">{{ tool.function.name }}</el-tag>
                 <pre>{{ tool.function.arguments }}</pre>
               </div>
-            </div>
-            <!-- 显示工具执行状态 -->
-            <div v-if="message.tool_status" class="tool-status">
-              <el-tag size="small" type="success">{{ message.tool_status }}</el-tag>
             </div>
           </div>
         </div>
